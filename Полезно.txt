@@ -1,0 +1,612 @@
+*перезагрузка дня для воркфлоу в девелопере*
+
+
+insert into `PARAM_OVERRIDE`(`WORKFLOW_NAME`,`REPORT_PERIOD_START`,`REPORT_PERIOD_END`,`MODE_TYPE`) 
+values ('wf_CONNECTOR_DATA_REL', STR_TO_DATE('04.11.2018 00:00:00', '%d.%m.%Y %H:%i:%s'),STR_TO_DATE('04.11.2018 00:00:00', '%d.%m.%Y %H:%i:%s'),'RELOAD');
+
+
+SET ROLE ROL_SUPPORT_DANGER IDENTIFIED BY DO#NOT$USE_THIS_ROLE; ---при правках на проде в контрольных таблицах?выполняется из-под SUPPORT 
+
+
+
+
+begin
+    for a_curs in (select object_code from ctl.load_object t where t.src = 'SOK')
+    loop  
+    ctl.ctl_log.calc_load_plan(a_curs.object_code);
+    end loop;
+    commit;
+end;                ---план загрузки
+
+
+cn=pyodbc.connect('DSN=bda31;Driver={Cloudera ODBC Driver For Apache Hive};HIVESERVERTYPE=2;HOST=bda31node04.moscow.alfaintra.net;PORT=10000;UID=t_hdb;SCHEMA=t_hdb_det;',autocommit=True)
+
+
+select segment_name,segment_type,bytes/1024/1024 MB
+ from dba_segments
+ where segment_type='TABLE' and segment_name in 
+ ('AGG_FRAT_EXPERIMENT_HDIM', 'AGTBALLIND_VHIST', 'AGTSIMPLEIND_STAT', 'ASS_SUBJECT_SHIST', 'AT_AGG_NAME_HDIM', 'AT_ANK_FACTOR_SHIST', 'AT_BAL_RATE_SHIST', 'AT_BRANCH_MEASURE_1_SHIST', 
+ 'AT_BRANCH_MEASURE_V_STAT', 'AT_BRANCH_RISK_VHIST', 'AT_CORRECT_RATING_SHIST', 'AT_COUNTRY_RATING_PERC_SHIST', 'AT_DISCOUNTRATE_VHIST', 'AT_DISCOUNT_1_VHIST', 'AT_DISCOUNT_V_STAT', 
+ 'AT_FACTOR_SHIST', 'AT_FORM_CODE_HDIM', 'AT_INDUSTRY_RISK_SHIST', 'AT_LIST_VALUE_HDIM', 'AT_MOTHER_PART_SHIST', 'AT_PROCRATE_VHIST', 'AT_SIGNAL_SHIST', 'AT_SUPPORT_RATING_SHIST', 
+ 'DET_ANK_FACTOR_SDIM', 'DET_BANKCOEF_HDIM', 'DET_BANK_HDIM', 'DET_BRANCH_EDIM', 'DET_COUNTRY_EDIM', 'DET_COUNTRY_RATING_SHIST', 'DET_CURRENCY_HDIM', 'DET_FACTOR_SHIST', 'DET_FINSTR_HDIM', 
+ 'DET_GUARANTY_TYPE_SHIST', ' DET_JURIDIC_PERSON_HDIM', ' DET_MODEL_SHIST', ' DET_OKATO_HDIM', ' DET_OKVED_EDIM', ' DET_PRODUCT_HDIM', ' DET_SCALE_SHIST', ' DET_SIGNAL_SDIM', 
+ 'DET_SUBJECT_HDIM', 'DET_SUPPORT_VALUE_SHIST', 'DET_TYPEINFO_HDIM', 'DET_TYPE_RATE_HDIM', 'FCT_ASSETS_V_STAT', 'FCT_BANKCOEFVALUE_1_VHIST', 'FCT_BANKCOEFVALUE_V_STAT', ' FCT_CF_V_STAT',
+ ' FCT_CLIENTS_V_STAT', ' FCT_CONSTRUCTIONS_V_STAT', ' FCT_CONTRACT_V_STAT', ' FCT_CREDITPORT_V_STAT', 'FCT_DATACOMMENT_STAT', 'FCT_DETAILS_TRAN', 'FCT_FINSTR_RATE_1_SHIST', 
+ 'FCT_FINSTR_RATE_V_STAT', 'FCT_FIN_DATA_1_SHIST', 'FCT_FIN_DATA_V_STAT', 'FCT_INVESTMENT_V_STAT', ' FCT_LEASING_FINDATA_V_STAT', 'FCT_LIABILITIES_V_STAT', 'FCT_MARKETSHARE_V_STAT',
+ 'FCT_OFFBAL_LIABILITIES_V_STAT', 'FCT_PLEDGE_1_SHIST', 'FCT_PLEDGE_V_STAT', 'FCT_SEGMENTATION_1_SHIST', 'FCT_SEGMENTATION_V_STAT', 'FCT_SHAREHOLDERS_V_STAT', 
+ 'FCT_SIGNAL_DATA_V_STAT', 'FCT_TURNOVER_V_STAT', 'FCT_UNFIN_DATA_1_SHIST', 'FCT_UNFIN_DATA_V_STAT', 'QUE_TASKACTIVATION_TRAN', 'SRP_OBJECT_HDIM','WIF_EXPERIMENT_TRAN'); ---проверка размера таблицы в оракл (в МБ)
+ 
+ 
+ -------------------------------------------------------------------------------------------------------------------------
+ пример  потока для экспорта в оракл из хайва
+ 
+ 
+ <workflow-app name="sqoop_export" xmlns="uri:oozie:workflow:0.5">
+    <start to="sqoop-7d6b"/>
+    <kill name="Kill">
+        <message>Action failed, error message[${wf:errorMessage(wf:lastErrorNode())}]</message>
+    </kill>
+    <action name="sqoop-7d6b">
+        <sqoop xmlns="uri:oozie:sqoop-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+              <arg>export</arg>
+              <arg>--connect</arg>
+              <arg>jdbc:oracle:thin:@(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=exa2-scan)(PORT=1521))(ADDRESS=(PROTOCOL=TCP)(HOST=exa1-scan)(PORT=1521)))(CONNECT_DATA=(SERVER=dedicated)(SERVICE_NAME=DWSTPROD_TAF)))</arg>
+              <arg>--table</arg>
+              <arg>apashevich.recovery_default_hadoop</arg>
+              <arg>--export-dir</arg>
+              <arg>/user/u_060yr/db/recovery_default_hadoop_all</arg>
+              <arg>--connection-manager</arg>
+              <arg>org.apache.sqoop.manager.OracleManager</arg>
+              <arg> --username</arg>
+              <arg>APASHEVICH</arg>
+              <arg>--password</arg>
+              <arg>APASHEVICH4</arg>
+              <arg>--columns</arg>
+              <arg>deal_uk,default_date,od,debt</arg>
+              <arg>--input-fields-terminated-by</arg>
+              <arg>\001</arg>
+        </sqoop>
+        <ok to="End"/>
+        <error to="Kill"/>
+    </action>
+    <end name="End"/>
+</workflow-app>
+
+
+--------------------------------------------------------------------------------------------------------------------------
+
+убить воркфлоу в девелопере
+
+./infacmd.sh wfs abortWorkflow  -dn DOMAIN_BDM_PROD -sn DIS_DVLP_PROD_BDA21 -un NVKuznetsova -pd NVKuznetsova -sdn Native -iid 4GYyeZM-EemcyyihLgQiTg
+
+посмотреть запущенные воркфлоу в девелопере
+
+ ./infacmd.sh wfs ListActiveWorkflowInstances -dn DOMAIN_BDM_PROD -sn DIS_DVLP_PROD_BDA21 -un NVKuznetsova -pd NVKuznetsova -sdn Native | grep Running
+
+ 
+ -------------------------------------------------------------------------------------------------------------------------
+флаги для расширенного логирования хадуповских джобов в Informatica Developer
+ 
+ 
+DebugHadoop=-1
+DebugHivePushdown=2
+
+--------------------------------------------------------------------------------------------------------------------------
+spark = чтение из файла и из бд
+
+val df = sqlContext.read.format("jdbc").
+option("url", "jdbc:oracle:thin:@172.19.22.250:1521/wsrmdb_readonly").
+option("user", "DWH_CLIENT").
+option("password","DWH_CLIENT").
+option("dbtable", "(select count(*) from RM.SM3_DIRS)").
+option("driver","oracle.jdbc.driver.OracleDriver").load()
+
+
+
+val dfora = sqlContext.read.format("jdbc").
+option("url", "jdbc:oracle:thin:@172.19.22.250:1521/wsrmdb_readonly").
+option("user", "DWH_CLIENT").
+option("password","DWH_CLIENT").
+option("dbtable", query2).
+option("driver","oracle.jdbc.driver.OracleDriver").load()
+
+
+
+
+
+val query2 = "(select distinct evnum from (select t.EVNUM from RM.SM3_REQ_LOG t where t.evtime between to_timestamp('10-JUL-1900:00:00.000000','DD-MON-RRHH24:MI:SS.FF') and to_timestamp('10-JUL-1923:59:59.999999','DD-MON-RRHH24:MI:SS.FF') union all (select t1.EVNUM from RM.SM3_RES_LOG t1 where t1.evtime between to_timestamp('10-JUL-1900:00:00.000000','DD-MON-RRHH24:MI:SS.FF') and to_timestamp('10-JUL-1923:59:59.999999','DD-MON-RRHH24:MI:SS.FF'))union all (select t2.EVNUM from RM.CCM_RES_LOG t2 where t2.evtime between to_timestamp('10-JUL-1900:00:00.000000','DD-MON-RRHH24:MI:SS.FF') and to_timestamp('10-JUL-1923:59:59.999999','DD-MON-RRHH24:MI:SS.FF'))union all (select t3.EVNUM from RM.CCM_REQ_LOG t3 where t3.evtime between to_timestamp('10-JUL-1900:00:00.000000','DD-MON-RRHH24:MI:SS.FF') and to_timestamp('10-JUL-1923:59:59.999999','DD-MON-RRHH24:MI:SS.FF'))union all (select t4.EVNUM from RM.RM_RES_LOG t4 where t4.evtime between to_timestamp('10-JUL-1900:00:00.000000','DD-MON-RRHH24:MI:SS.FF') and to_timestamp('10-JUL-1923:59:59.999999','DD-MON-RRHH24:MI:SS.FF'))))"
+val hivedf = sqlContext.read.text("/test/t_hdb/tmp/wsrm20190710.xls")
+val dfora = sqlContext.read.format("jdbc").
+option("url", "jdbc:oracle:thin:@172.19.22.250:1521/wsrmdb_readonly").
+option("user", "DWH_CLIENT").
+option("password","DWH_CLIENT").
+option("dbtable", query2).
+option("driver","oracle.jdbc.driver.OracleDriver").load()
+
+--------------------------------------------------------------------------------------------------------------------------
+
+
+con = pyodbc.connect("DSN=bda31",autocommit=True) --коннектор из питона к хайву
+conn = cx_Oracle.connect("DWH_CLIENT", "DWH_CLIENT", "hundbn/wsrmdb_readonly") --коннектор из питона к ораклу
+
+
+---------------------------------------------------------------------------------------------------------------------------
+строка подключения к спарку (пример)
+
+spark-shell --driver-class-path /home/l_hdb/ojdbc6.jar --jars /home/l_hdb/ojdbc6.jar --driver-memory 2G --executor-memory 4G --queue root.prod
+---------------------------------------------------------------------------------------------------------------------------
+
+преобразование даты в форматы Оракл, Хайв, Mysql через питон
+
+datetime.date.today().strftime('%Y-%m-%d')
+'2019-08-02'
+datetime.date.today().strftime('%Y%m%d')
+'20190802'
+datetime.date.today().strftime('%d.%m.%Y 00:00:00')
+'02.08.2019 00:00:00'
+
+
+----------------------------------------------------------------------------------------------------------------------------
+
+sqlContext.sql("select count(*) from l_hdb_mort_det.bapplication where day = 20190710")
+
+
+val wsrmcount = sqlContext.read.format("jdbc").
+    option("url", "jdbc:hive2://bda31node04:10000/;principal=hive/bda31node04.moscow.alfaintra.net@moscow.alfaintra.net").
+    option("user","t_hdb").
+    option("password","test").
+    option("dbtable","l_hdb_det.wsrm_log").
+    option("query", "(select evnum from l_hdb_det.wsrm_log)").
+    option("partitionColumn", "day").
+    option("lowerBound" ,"20190730").
+    option("upperBound", "20190730").
+    option("numPartitions", "1").
+    option("driver","org.apache.hive.jdbc.HiveDriver").load()
+-----------------------------------------------------------------------------------------------------------------------------
+
+beeline -u "jdbc:hive2://bda41node04:10000/;principal=hive/bda41node04.moscow.alfaintra.net@moscow.alfaintra.net" 
+-e 'ЗАПРОС' 
+> /home/l_hdb/probe_check_count/EOM_20190803_probesm_reject_fdb_m.txt
+
+------------------------------------------------------------------------------------------------------------------------------
+
+begin 
+    for cur in (
+    select a.owner, a.object_name from SYS.DBA_OBJECTS a where a.owner in ('CTL', 'DMSHDB', 'DMHDB_DICT') and a.object_type = 'TABLE')
+    loop
+    EXECUTE IMMEDIATE 'GRANT SELECT ON ' || cur.owner || '.' || cur.object_name || ' TO ROL_TECHNOLOGIST';
+    end loop;
+    commit;
+end;
+------------------------------------------------------------------------------------------------------------------------------
+
+
+вывод вчерашней даты в формате ГГГГ-ММ-ДД в linux
+
+ date --date="yesterday" +%F
+ date --date="5 days ago" +%F
+ 
+------------------------------------------------------------------------------------------------------------------------------
+crontab
+
+
+примерная последовательность действий:
+1. Закидываете скрипт в свою рабочую директорию на bipython2 (например через winscp, или окно jupyterhub, или просто создаете фал с кодом)
+2. "Садитесь" в терминал (можно через jupyterhub, можно через putty или аналоги, как удобней)
+3. Добавляете скрипту права на исполнение  (chmod +x scriptname.py)
+4. Редактируете cron (crontab -e)
+по умолчанию там редактор vim; нажимаем на клавиатуре Insert чтобы выбрать режим обычного редактирования; заносим задание; чтобы сохранить нажимаем esc, вводим ":wq"; готово
+строка для вставки в кронтаб имеет вид: 
+минута час день месяц день_недели /путь/к/исполняемому/файлу >>/путь/куда/писать/логи
+например, чтобы выполнять раз в день (в 0:00):
+0 0 * * * /home/username/scriptname.py >>/home/username/scriptname.log
+
+________________________________________________________________________________________________________________________________
+
+если вставить в MySQL строку с полем типа ДАТА неправильного формата - выпадает ошибка
+удалить строку можно так
+
+delete from SM3_LOAD_STATE_OLD where Target_Date = '0000-00-00';
+
+_________________________________________________________________________________________________________________________________
+
+вывод результата команды в файл (если стандартные методы не помогают)
+
+script -c "oozie jobs -oozie http://bda41node04.moscow.alfaintra.net:11000/oozie -filter user=l_hdb;status=RUNNING"&>~/oozie_out.txt
+
+__________________________________________________________________________________________________________________________________
+
+запуск команды из python 
+
+os.system("текст_команды")
+
+содержимое папки из python
+
+os.listdir("путь к папке") --возвращает список имен
+
+__________________________________________________________________________________________________________________________________
+__________________________________________________________________________________________________________________________________
+
+
+ALTER USER user_name IDENTIFIED BY password ACCOUNT UNLOCK; --разблокировать пользователя ORACLE , password- новый пароль
+
+__________________________________________________________________________________________________________________________________
+
+
+--соблюдение регламента за период 
+with t1 as 
+(select null,trunc(START_DTTM) dt, 18 Plany ,round((end_dttm-trunc(end_dttm))*24,2) Facts, 61 "Reglament(T+3)", 
+case  
+when round((end_dttm-trunc(end_dttm))*24,2) between 18 and 61 then 'WELL' 
+when round((end_dttm-trunc(end_dttm))*24,2) < 18 then 'GOOD' 
+else 'BAD' 
+end status_sla1
+from DASH.DASH_DURATION_ALL 
+where sys_type ='hdb_d' and sys_type_name like '%DWH%' AND TRUNC(START_DTTM) >= 
+date'2019-01-01' and round((end_dttm-trunc(end_dttm))*24,2) <= 18
+--and 
+/*TRUNC(SYSDATE)-120*/
+order by dt) ,
+t2 as
+(select null,trunc(START_DTTM) dt, 18 Plany ,round((end_dttm-trunc(end_dttm))*24,2) Facts, 61 "Reglament(T+3)", 
+case  
+when round((end_dttm-trunc(end_dttm))*24,2) between 18 and 61 then 'WELL' 
+when round((end_dttm-trunc(end_dttm))*24,2) < 18 then 'GOOD' 
+else 'BAD' 
+end status_sla
+from DASH.DASH_DURATION_ALL 
+where sys_type ='hdb_d' and sys_type_name like '%DWH%' AND TRUNC(START_DTTM) >= 
+date'2019-01-01' 
+/*TRUNC(SYSDATE)-120*/
+order by dt),
+t3 as
+(select null,trunc(START_DTTM) dt, 18 Plany ,round((end_dttm-trunc(end_dttm))*24,2) Facts, 48+3 "Reglament(T+3)", 
+case  
+when round((end_dttm-trunc(end_dttm))*24,2) between 18 and 61 then 'WELL' 
+when round((end_dttm-trunc(end_dttm))*24,2) < 18 then 'GOOD' 
+else 'BAD' 
+end status_sla
+from DASH.DASH_DURATION_ALL 
+where sys_type ='hdb_d' and sys_type_name like '%DWH%' AND TRUNC(START_DTTM) >= 
+date'2019-01-01' and round((end_dttm-trunc(end_dttm))*24,2) <= 61
+/*TRUNC(SYSDATE)-120*/
+order by dt)
+select count(distinct t1.dt) / count(distinct t2.dt) *100 as SLA_PLAN, count(distinct t3.dt) / count(distinct t2.dt) *100 as SLA_T_3 from t1, t2 ,t3
+;
+
+____________________________________________________________________________________________________________________________________
+
+https://binary/artifactory/api/pypi/pipy-virtual/simple --pip внутренний альфа
+
+
+____________________________________________________________________________________________________________________________________
+import re 
+s="строка с разделителями 1 или несколько пробелов"
+re.split(r'\s+', s) --деление строки по разделителю "1 или несколько пробелов"
+
+____________________________________________________________________________________________________________________________________
+
+
+
+подгон задач для шедулера
+call monitoring.fill_schd_tasks('hdb_d');
+--call monitoring.fill_schd_tasks('rwa_daily');
+call monitoring.fill_schd_tasks('hdb_m');
+call monitoring.FILL_FACT_schd_bda_tasks('hdb_d');
+
+______________________________________________________________________________________________________________________________________
+найти sid и serial# сессии
+
+SELECT s.inst_id,
+       s.sid,
+       s.serial#,
+       --s.sql_id,
+       p.spid,
+       s.username,
+       s.program
+FROM   gv$session s
+       JOIN gv$process p ON p.addr = s.paddr AND p.inst_id = s.inst_id
+WHERE  s.type != 'BACKGROUND';
+
+убить сессию
+
+alter system kill session '31,8779' immediate;
+
+_______________________________________________________________________________________________________________________________________
+
+INSERT /*+ PARALLEL(employees) */ INTO employees
+SELECT /*+ PARALLEL(ACME_EMP) */ *  FROM ACME_EMP;
+
+
+
+________________________________________________________________________________________________________________________________________
+
+
+
+КЕЙТАБ
+
+
+ktutil: add_entry -password -p <principal>@BDA.MOSCOW.ALFAINTRA>NET -k 1 -e des3-cbc-sha1-kd 
+Password for <principal>@realm: 
+
+ktutil: add_entry -password -p <principal>@BDA.MOSCOW.ALFAINTRA>NET -k 1 -e arcfour-hmac-md5 
+Password for <principal>@realm: 
+
+ktutil: add_entry -password -p <principal>@BDA.MOSCOW.ALFAINTRA>NET -k 1 -e des-hmac-sha1 
+Password for <principal>@realm: 
+
+ktutil: add_entry -password -p <principal>@BDA.MOSCOW.ALFAINTRA>NET -k 1 -e des-cbc-md5 
+Password for <principal>@realm: 
+
+ktutil: add_entry -password -p <principal>@BDA.MOSCOW.ALFAINTRA>NET -k 1 -e des-cbc-md4 
+Password for <principal>@realm:
+
+ktutil: wkt /path_to_keytab_file/vemkd.keytab 
+
+____________________________________________________________________________________________________________________________________________
+
+l=subprocess.check_output("ls ",shell=True,encoding="UTF8").split("\n")[:-1]
+
+возвращает результат команды как список
+
+____________________________________________________________________________________________________________________________________________
+
+select w.app_name, w.start_time, w.end_time, w.status, w2.app_name parent from WF_JOBS w join WF_JOBS w2 on w.parent_id = w2.id 
+where w.start_time >= '2020-01-09' and w.status not in ("SUCCEEDED", "RUNNING") and w2.start_time >='2020-01-09' 
+and w2.app_name not like '%_reg_%' and w2.app_name not like '%_loop' and w.app_name not like '%_loop';
+
+____________________________________________________________________________________________________________________________________________
+
+hdsf dfs -ls -C --содержимое папки (только имена, без привилегий и т.д.)
+
+____________________________________________________________________________________________________________________________________________
+Доступ предоставлен - SKHARLAMOV2/SKHARLAMOV21
+TNS БД DWSTPROD:
+DWSTPROD_TAF =
+(DESCRIPTION =
+(ADDRESS = (PROTOCOL = TCP)(HOST = exa2-scan)(PORT = 1521))
+(ADDRESS = (PROTOCOL = TCP)(HOST = exa1-scan)(PORT = 1521))
+(CONNECT_DATA =
+(SERVER = DEDICATED)
+(SERVICE_NAME = DWSTPROD_TAF)
+) )
+_____________________________________________________________________________________________________________________________________________
+CREATE TABLE avro_test ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.avro.AvroSerDe' STORED AS AVRO TBLPROPERTIES ('avro.schema.url'='myHost/myAvroSchema.avsc'); 
+CREATE EXTERNAL TABLE parquet_test LIKE avro_test STORED AS PARQUET LOCATION 'hdfs://myParquetFilesPath';
+_____________________________________________________________________________________________________________________________________________
+
+статистика wsrm_log 2007-2019
+
+years=(2007 2008 2009 2010 2011 2012 2013 2014 2015 2016 2017 2018 2019)
+for year in ${years[*]};do impala-shell -i bda41node03  -f /home/l_hdb/various_scripts/wsrm_stats_${year}_1.sh; impala-shell -i bda41node03  -f /home/l_hdb/various_scripts/wsrm_stats_${year}_2.sh; done
+
+______________________________________________________________________________________________________________________________________________
+
+актуализация SM3_LOAD_STATE после добавления файлов в SRC
+
+CREATE PROCEDURE insert_dates_SM3_LOAD_STATE(dfrom DATE,dto DATE)
+BEGIN
+declare d DATE;
+  #label1: LOOP
+  set d = dfrom;
+  while d<=dto do 
+    insert into SM3_LOAD_STATE (Target_Date,InSrc,InDet,InRdb,is_Archive,InDetMass,InDetMort) VALUES (d,1,0,0,0,0,0);
+    set d = date_add(d, interval 1 day);
+   
+  end while;
+    #select d from dual;
+  #END LOOP label1;
+  
+END;
+
+________________________________________________________________________________________________________________________________________________
+
+
+pip install --proxy bda41node01:3128 kafka-python --trusted-host pypi.org --trusted-host files.pythonhosted.org
+
+
+
+_________________________________________________________________________________________________________________________________________________
+
+
+refresh l_hdb_mass_det.${table};
+refresh l_hdb_mass_det.${table}_tmp;
+select a.day, a.c, b.day, b.c from  
+(select day, count(*) c from l_hdb_mass_det.${table}_tmp group by day order by day desc limit 10000) as a 
+left join 
+(select day, count(*) c from l_hdb_mass_det.${table} group by day order by day desc limit 10000) as b 
+on a.day=b.day where b.c <> a.c or b.c is null;
+
+
+__________________________________________________________________________________________________________________________________________________
+
+tableslist.map(t =>  {
+     |  val query="select a.day, a.c, b.day, b.c from (select day, count(*) c from l_hdb_mass_det.%s_tmp group by day order by day desc limit 10000) as a left join (select day, count(*) c from l_hdb_mass_det.%s group by day order by day desc limit 10000) as b on a.day=b.day where b.c <> a.c or b.c is null"
+     | val qr = sqlContext.sql(query.format(t,t))
+     | qr.show()}
+     | )
+
+___________________________________________________________________________________________________________________________________________________
+
+таблица количества строк в источниках SM3
+
+create table l_hdb_tmp.sm3_sourcedata_check_bkp_2 as select * from l_hdb_tmp.sm3_sourcedata_check union all select * from l_hdb_tmp.sm3_sourcedata_check_bkp;
+select count(*) from l_hdb_tmp.sm3_sourcedata_check_bkp_2 union all select count(*) from l_hdb_tmp.sm3_sourcedata_check_bkp union all select count(*) from l_hdb_tmp.sm3_sourcedata_check;
+
+show create table l_hdb_tmp.sm3_sourcedata_check;
+drop table l_hdb_tmp.sm3_sourcedata_check_bkp purge;
+alter table l_hdb_tmp.sm3_sourcedata_check_bkp_2 rename to l_hdb_tmp.sm3_sourcedata_check_bkp;
+
+
+
+_____________________________________________________________________________________________________________________________________________________
+
+merge into test_skh t using (select 4 id, 'Bob' name , date'2020-02-17' as_of_day ,4 c from dual) d on
+(t.id=d.id and t.Name=d.name)
+when matched then
+update  set as_of_day=date'2020-02-17'
+when not matched then
+insert values (10, 'Bob' , date'2020-02-17',14)
+;
+
+______________________________________________________________________________________________________________________________________________________
+
+CREATE PROCEDURE `insert_dates_SM3_LOAD_STATE_v2`(dfrom DATE,dto DATE)
+BEGIN
+declare d DATE;
+  #label1: LOOP
+  set d = dfrom;
+  while d<=dto do 
+    if d not in (select target_date from SM3_LOAD_STATE) then
+      insert into SM3_LOAD_STATE (Target_Date,InSrc,InDet,InRdb,is_Archive,InDetMass,InDetMort) VALUES (d,1,0,0,0,0,0);
+      
+    end if;  
+    set d = date_add(d, interval 1 day);
+   
+  end while;
+    #select d from dual;
+  #END LOOP label1;
+  
+END
+
+_______________________________________________________________________________________________________________________________________________________
+
+--пример insert overwrite с динамическими партициями
+set hive.exec.dynamic.partition=true;
+set hive.exec.dynamic.partition.mode=nonstrict;
+set hive.exec.max.dynamic.partitions = 10000;
+set mapreduce.map.java.opts=-Xmx8G;
+set mapreduce.map.memory.mb=6112;
+
+INSERT OVERWRITE TABLE l_deriveddata.recoverywoifrs_tran_day PARTITION(date_part)
+select 
+xk    ,  
+ value_day    ,  
+ deal_uk     , 
+ profitcenter_uk    ,  
+ product_uk ,  
+ client_uk     , 
+ currency_uk    ,  
+ block_uk    ,  
+ productgroup_uk    ,  
+ cast(princpal_usd_amt as DECIMAL(18,5))    ,  
+ cast(princpal_cur_amt as DECIMAL(18,2))    ,  
+ cast(interest_usd_amt as DECIMAL(18,5))     , 
+ cast(interest_cur_amt as DECIMAL(18,2))    ,  
+ as_of_day ,  
+  deleted_flag    ,  
+  job_insert    ,  
+  job_update    ,  
+  dwscmix   ,  
+  account_loan_uk    ,  
+  account_cover_uk    ,  
+  cast(princpal_rur_amt as DECIMAL(18,2))    ,  
+  cast(interest_rur_amt as DECIMAL(18,2))    ,  
+  date_part  
+
+from p_rr_anl.recoverywoifrs_tran_day 
+where date_part>=20120111 and date_part<=20191231;
+
+___________________________________________________________________________________________
+
+Проверка данных на СОК
+
+SELECT DT, UPPER(CODE) CODE,  VERSION,  ID_SUBJECT, ID_REPPERIOD, COUNT(*) 
+FROM
+ almonde.LDR_HDB.V_AGTBALLIND 
+--WHERE
+--LOG_DATE >= convert(datetime,'29/05/2020 00:00:00',103) 
+ --order by VERSION, UPPER(CODE),  DT, ID_REPPERIOD, ID_SUBJECT
+ group by DT,  CODE,  VERSION,  ID_SUBJECT, ID_REPPERIOD
+ having count(*) > 1;
+ 
+ ___________________________________________________________________________________________
+ 
+ --Вызов  sqoop import из командной строки
+ sqoop import --connect "jdbc:oracle:thin:@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=EXA2-SCAN)(PORT=1521))(ADDRESS=(PROTOCOL=TCP)(HOST=EXA1-SCAN)(PORT=1521))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME=DWSTPROD_TAF)))" --username tech_replicate_bda --password b7rep34#da_45 --compression-codec org.apache.hadoop.io.compress.SnappyCodec --as-parquetfile --delete-target-dir --target-dir /user/u_m10q3/db/balance_test --query "SELECT XK,CURRENCY_UK,ACCOUNT_UK, to_char(VALUE_DAY,'YYYY-MM-DD') VALUE_DAY,DEBET_TURN_AMT_CUR,CREDIT_TURN_AMT_CUR,DEBET_TURN_AMT_RUR,CREDIT_TURN_AMT_RUR FROM DWH.BALANCE_HSTAT where value_day >= date'2020-01-01' and  \$CONDITIONS" -m 1 --map-column-java CURRENCY_UK=Double,ACCOUNT_UK=Double,DEBET_TURN_AMT_CUR=Double,CREDIT_TURN_AMT_CUR=Double,DEBET_TURN_AMT_RUR=Double,CREDIT_TURN_AMT_RUR=Double,XK=Double
+
+ 
+ ____________________________________________________________________________________________
+ 
+ 
+ Попробуйте добавлять опцию
+sqlContext.setConf("spark.sql.hive.convertMetastoreParquet","false")
+
+______________________________________________________________________________________________
+когда спарк не читает созданые собой же таблицы
+
+ spark.sql("alter table p_datalake.mo_team_feats_4_modeling_all_clients set SERDEPROPERTIES ('path' = 'hdfs://bda31/pilot/p_datalake/db/mo_team_feats_4_modeling_all_clients')")
+ spark.catalog.refreshTable("p_datalake.mo_team_feats_4_modeling_all_clients")
+
+_______________________________________________________________________________________________
+
+
+вообще, пишут что это известнй баг, и он случается раз не несколько сотен запусков 
+https://issues.apache.org/jira/browse/OOZIE-2536 
+
+похоже что для решения нужен будет какой-то патч накатить
+
+________________________________________________________________________________________________
+
+--отсортированный в обратном порядке по объему список папок на hdfs
+
+hadoop fs -du -h  /pilot/p_validation/db | awk '{print $1$2,$3$4, $5}' | sort -hr > ~/disk_usage.txt
+
+_________________________________________________________________________________________________
+
+--посмотреть привелегии пользователя oracle
+
+select * from dba_role_privs connect by prior granted_role = grantee start with grantee = 'PYEREMIN' order by 1,2,3;
+select * from dba_sys_privs  where grantee = '&USER' or grantee in (select granted_role from dba_role_privs connect by prior granted_role = grantee start with grantee = '&USER') order by 1,2,3;
+select * from dba_tab_privs  where grantee = '&USER' or grantee in (select granted_role from dba_role_privs connect by prior granted_role = grantee start with grantee = '&USER') order by 1,2,3,4;
+
+
+__________________________________________________________________________________________________
+
+--Добавить роль уже существующему пользователю
+
+call
+DBATOOLS.USAS_DOSTUP.addrole(
+upper('ABoev2')       /*VUSER IN VARCHAR2*/    
+,'ROL_TECHNOLOGIST'  /*VROLE IN VARCHAR2*/
+,add_months(trunc(sysdate),12*10)   /*VVALIDUNTILDATE IN DATE*/
+,'T10079360'                         /*VTASKNUMBER IN VARCHAR2*/ -- SM task 
+);
+
+__________________________________________________________________________________________________
+
+--заполнить время завершения потоков
+--выборка
+select t.*, t.PLAN_END - round(DBMS_RANDOM.value(1,100),0)*interval '1' minute from MONITORING.SCHD_TASKS t 
+where T.RESPONSIBLE_USER_CD = 'skharlamov2' and T.FACT_END is null and t.fact_begin <= sysdate - interval '1' day;
+
+--заполнение
+update MONITORING.SCHD_TASKS t set  
+t.fact_end = t.plan_end - round(DBMS_RANDOM.value(1,100),0)*interval '1' minute
+where T.RESPONSIBLE_USER_CD = 'skharlamov2' and T.FACT_END is null
+ and t.fact_begin <= sysdate - interval '1' day;
+commit;
+ 
+___________________________________________________________________________________________________
+--чтение значения ноды из xml
+SELECT * FROM rm.sm3_res_log q WHERE 
+syscode='MG'
+AND EXTRACTVALUE(xmltype(OUT_PARMS),'DAXMLDocument/BAPPLICATION/APP_SERIAL_NUM/value') in
+('G0APO250S18120400257','G0CHO250S18120500216');
+
+___________________________________________________________________________________________________
+ -- сбор статистики в оракл
+ 
+ begin
+dbms_stats.gather_table_stats( ownname => 'DMSHDB'
+,tabname => 'RPT_SOK_MAIN3_PROC1');
+end;
+
+или
+
+ANALYZE TABLE dmshdb.rpt_sok_main3_proc1 COMPUTE STATISTICS;
+
+
+____________________________________________________________________________________________________
